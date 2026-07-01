@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, RotateCcw, ChevronRight, Gamepad2, Volume2, Award, Clock, Flame, Percent, AlertCircle } from 'lucide-react';
+import { Play, RotateCcw, ChevronRight, Gamepad2, Volume2, Award, Clock, Flame, Percent, AlertCircle, Zap } from 'lucide-react';
 
 // --- 音響効果（Web Audio API） ---
 const playSynthSound = (type: 'success' | 'clear' | 'failed') => {
@@ -255,6 +255,29 @@ interface SENotification {
   timestamp: number;
 }
 
+// ビジュアルフィードバック用ポップアップ型
+interface VisualPopup {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  colorClass: string;
+  life: number;
+}
+
+// ビジュアルフィードバック用パーティクル型
+interface VisualParticle {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  color: string;
+  alpha: number;
+  life: number;
+}
+
 export default function App() {
   // 画面状態: 'title' | 'select' | 'game' | 'result'
   const [scene, setScene] = useState<'title' | 'select' | 'game' | 'result'>('title');
@@ -274,6 +297,15 @@ export default function App() {
   const [hitCount, setHitCount] = useState<number>(0);
   const [missCount, setMissCount] = useState<number>(0);
   const [clearTime, setClearTime] = useState<number>(0);
+
+  // コンボシステムステート
+  const [currentCombo, setCurrentCombo] = useState<number>(0);
+  const [maxCombo, setMaxCombo] = useState<number>(0);
+
+  // ビジュアルエフェクトステート
+  const [popups, setPopups] = useState<VisualPopup[]>([]);
+  const [particles, setParticles] = useState<VisualParticle[]>([]);
+  const [isMissFlashing, setIsMissFlashing] = useState<boolean>(false);
 
   // マウス/カーソル位置 (ゲーム領域の左上を原点 0,0 とした相対ピクセル座標)
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -312,6 +344,61 @@ export default function App() {
     setSeNotifications(prev => [newNotification, ...prev].slice(0, 5));
   };
 
+  // 撃破エフェクトの生成
+  const createHitEffects = (x: number, y: number, comboVal: number) => {
+    // 弾けるパーティクル生成 (15個程度)
+    const newParticles: VisualParticle[] = [];
+    const colors = ['#f43f5e', '#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#fef08a'];
+    for (let i = 0; i < 15; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 5 + 3;
+      newParticles.push({
+        id: `p-${Date.now()}-${i}-${Math.random()}`,
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: Math.random() * 5 + 3,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        alpha: 1,
+        life: 1.0
+      });
+    }
+
+    // ポップアップテキスト生成
+    const newPopup: VisualPopup = {
+      id: `pop-${Date.now()}-${Math.random()}`,
+      x,
+      y: y - 10,
+      text: comboVal > 1 ? `${comboVal} Combo!` : '+1',
+      colorClass: comboVal >= 10 ? 'text-yellow-400 font-extrabold text-xl scale-110 drop-shadow-[0_2px_8px_rgba(234,179,8,0.5)]' : comboVal >= 5 ? 'text-amber-300 font-bold text-lg' : 'text-indigo-300 font-medium text-sm',
+      life: 1.0
+    };
+
+    setParticles(prev => [...prev, ...newParticles]);
+    setPopups(prev => [...prev, newPopup]);
+  };
+
+  // ミス時のエフェクト生成
+  const createMissEffect = (x: number, y: number) => {
+    // 赤フラッシュを発動
+    setIsMissFlashing(true);
+    setTimeout(() => {
+      setIsMissFlashing(false);
+    }, 120);
+
+    // ポップアップ「MISS!」
+    const newPopup: VisualPopup = {
+      id: `pop-miss-${Date.now()}-${Math.random()}`,
+      x,
+      y: y - 10,
+      text: 'MISS!',
+      colorClass: 'text-rose-500 font-black tracking-wider text-base drop-shadow-[0_2px_6px_rgba(244,63,94,0.4)] animate-pulse',
+      life: 1.0
+    };
+    setPopups(prev => [...prev, newPopup]);
+  };
+
   // 通知の時間経過消滅
   useEffect(() => {
     const interval = setInterval(() => {
@@ -334,6 +421,11 @@ export default function App() {
     setSpawnedCount(0);
     setPhasesTriggered([]);
     setEnemies([]);
+    setCurrentCombo(0);
+    setMaxCombo(0);
+    setPopups([]);
+    setParticles([]);
+    setIsMissFlashing(false);
     zIndexCounter.current = 1;
     startTimeRef.current = Date.now();
 
@@ -555,6 +647,31 @@ export default function App() {
         });
       });
 
+      // ポップアップの更新
+      setPopups(prevPopups => {
+        return prevPopups
+          .map(pop => ({
+            ...pop,
+            y: pop.y - 1.2 * dt,
+            life: pop.life - 0.02 * dt
+          }))
+          .filter(pop => pop.life > 0);
+      });
+
+      // パーティクルの更新
+      setParticles(prevParticles => {
+        return prevParticles
+          .map(p => ({
+            ...p,
+            x: p.x + p.vx * dt,
+            y: p.y + p.vy * dt,
+            vy: p.vy + 0.1 * dt, // 簡易的な重力
+            alpha: Math.max(0, p.life - 0.02 * dt),
+            life: p.life - 0.02 * dt
+          }))
+          .filter(p => p.life > 0);
+      });
+
       physicsRef.current = requestAnimationFrame(updatePhysics);
     };
 
@@ -614,6 +731,19 @@ export default function App() {
         triggerSE('success');
         setHitCount(prev => prev + matchedEnemies.length);
         
+        // コンボ数を更新
+        setCurrentCombo(prev => {
+          const nextVal = prev + matchedEnemies.length;
+          setMaxCombo(oldMax => Math.max(oldMax, nextVal));
+          
+          // 各撃破ターゲットの座標で撃破ビジュアルフィードバックを実行
+          matchedEnemies.forEach((enemy, idx) => {
+            createHitEffects(enemy.x, enemy.y, nextVal + idx);
+          });
+          
+          return nextVal;
+        });
+
         // 撃破した敵を削除
         const matchedIds = matchedEnemies.map(e => e.id);
         const updatedEnemies = enemies.filter(e => !matchedIds.includes(e.id));
@@ -630,11 +760,31 @@ export default function App() {
         }
       } else {
         // 入力ミスのカウント
-        setMissCount(prev => prev + 1);
+        setCurrentCombo(0);
+        setMissCount(prev => {
+          const nextVal = prev + 1;
+          if (nextVal >= 5) {
+            setTimeout(() => {
+              handleStageFailed();
+            }, 0);
+          }
+          return nextVal;
+        });
+        createMissEffect(mousePos.x, mousePos.y);
       }
     } else {
       // 敵がいない場所での入力/クリックもミス判定
-      setMissCount(prev => prev + 1);
+      setCurrentCombo(0);
+      setMissCount(prev => {
+        const nextVal = prev + 1;
+        if (nextVal >= 5) {
+          setTimeout(() => {
+            handleStageFailed();
+          }, 0);
+        }
+        return nextVal;
+      });
+      createMissEffect(mousePos.x, mousePos.y);
     }
   };
 
@@ -849,6 +999,22 @@ export default function App() {
                   撃破: {hitCount} / {selectedStage.totalEnemies} 体
                 </span>
               </div>
+              <div className="h-6 w-px bg-slate-800" />
+              <div>
+                <span className="text-xs text-slate-500 font-mono tracking-wider block uppercase">Max Combo</span>
+                <span className="font-mono text-sm font-bold text-amber-400">
+                  {maxCombo} Combo
+                </span>
+              </div>
+              <div className="h-6 w-px bg-slate-800" />
+              <div>
+                <span className="text-xs text-rose-500 font-mono tracking-wider block uppercase">LIFE</span>
+                <span className="font-mono text-sm font-bold text-rose-500 flex items-center gap-1">
+                  {"❤️".repeat(Math.max(0, 5 - missCount))}
+                  {"🖤".repeat(Math.max(0, missCount))}
+                  <span className="text-[10px] text-slate-400 font-normal ml-0.5">({5 - missCount}/5)</span>
+                </span>
+              </div>
             </div>
 
             {/* リタイアボタン & 制限時間メーター */}
@@ -960,6 +1126,64 @@ export default function App() {
               </div>
             )}
 
+            {/* ミス時の赤フラッシュエフェクト */}
+            {isMissFlashing && (
+              <div 
+                id="miss-flash-overlay"
+                className="absolute inset-0 bg-rose-600/20 border-4 border-rose-500 pointer-events-none z-50 animate-pulse duration-100" 
+              />
+            )}
+
+            {/* 浮き上がるポップアップテキスト */}
+            {popups.map(pop => (
+              <div
+                key={pop.id}
+                id={pop.id}
+                className={`absolute pointer-events-none font-sans select-none tracking-tight transition-opacity duration-100 ${pop.colorClass}`}
+                style={{
+                  left: `${pop.x}px`,
+                  top: `${pop.y}px`,
+                  opacity: pop.life,
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 9999,
+                }}
+              >
+                {pop.text}
+              </div>
+            ))}
+
+            {/* 弾けるパーティクルエフェクト */}
+            {particles.map(p => (
+              <div
+                key={p.id}
+                id={p.id}
+                className="absolute rounded-full pointer-events-none"
+                style={{
+                  left: `${p.x}px`,
+                  top: `${p.y}px`,
+                  width: `${p.size}px`,
+                  height: `${p.size}px`,
+                  backgroundColor: p.color,
+                  opacity: p.alpha,
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 9998,
+                }}
+              />
+            ))}
+
+            {/* 現在のコンボインジケーター表示 */}
+            {currentCombo > 0 && (
+              <div 
+                id="combo-streak-container"
+                className="absolute top-4 right-4 pointer-events-none flex flex-col items-end z-40 animate-bounce"
+              >
+                <span className="text-[9px] font-mono font-bold text-amber-500 tracking-widest uppercase">Combo Streak</span>
+                <span className="text-4xl font-black font-mono text-amber-400 drop-shadow-[0_2px_8px_rgba(245,158,11,0.5)]">
+                  {currentCombo}
+                </span>
+              </div>
+            )}
+
             {/* 未出現ターゲットを知らせるテキスト（フッター） */}
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-black/60 backdrop-blur-md rounded-full border border-slate-800 text-[10px] font-mono text-slate-400 tracking-wider flex items-center gap-2">
               <span>アクティブターゲット: {enemies.length}体</span>
@@ -1001,7 +1225,7 @@ export default function App() {
           </div>
 
           {/* リザルト統計パネル */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-2xl mb-12">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-3xl mb-12">
             
             {/* クリアタイム / 経過時間 */}
             <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col items-center justify-center text-center">
@@ -1023,9 +1247,18 @@ export default function App() {
               </span>
             </div>
 
+            {/* 最大コンボ数 */}
+            <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col items-center justify-center text-center">
+              <Zap className="w-6 h-6 mb-2 text-amber-400" />
+              <span className="text-xs text-slate-500 font-mono">最大コンボ数</span>
+              <span className="text-2xl font-black font-mono text-white mt-1">
+                {maxCombo} Combo
+              </span>
+            </div>
+
             {/* タイピングの正確さ(ミスタイプ数) */}
             <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col items-center justify-center text-center">
-              <Percent className="w-6 h-6 mb-2 text-amber-500" />
+              <Percent className="w-6 h-6 mb-2 text-indigo-400" />
               <span className="text-xs text-slate-500 font-mono">ミスタイプ数</span>
               <span className="text-2xl font-black font-mono text-white mt-1">
                 {missCount}回
