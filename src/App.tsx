@@ -77,11 +77,10 @@ const playSynthSound = (type: 'success' | 'clear' | 'failed') => {
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const NUMBERS = '0123456789'.split('');
 const SYMBOLS = ['-', '[', ']', ';', ':', ',', '.', '/'];
-const MOUSE_INPUTS = ['左', '右', 'ホ'];
 
 // ランダムにターゲット文字/指示を取得
 const getRandomIndicator = (): string => {
-  const pool = [...ALPHABET, ...NUMBERS, ...SYMBOLS, ...MOUSE_INPUTS];
+  const pool = [...ALPHABET, ...NUMBERS, ...SYMBOLS];
   return pool[Math.floor(Math.random() * pool.length)];
 };
 
@@ -713,17 +712,14 @@ export default function App() {
   };
 
   // --- 入力キー判定 ---
-  const handleInputMatch = (inputVal: string, isClick: boolean) => {
+  // --- 入力キー判定 ---
+  const handleInputMatch = (inputVal: string) => {
     if (isGameOver || isGameClear || scene !== 'game') return;
 
     if (overlappingEnemies.length > 0) {
       // 重なっているすべてのエネミーのうち、入力が合致するものを抽出して撃破
       const matchedEnemies = overlappingEnemies.filter(enemy => {
-        if (isClick) {
-          return enemy.indicator === inputVal;
-        } else {
-          return enemy.indicator.toLowerCase() === inputVal.toLowerCase();
-        }
+        return enemy.indicator.toLowerCase() === inputVal.toLowerCase();
       });
 
       if (matchedEnemies.length > 0) {
@@ -795,7 +791,7 @@ export default function App() {
       
       // ファンクションキーや修飾キーを除く、標準のキー入力を対象とする
       if (e.key.length === 1) {
-        handleInputMatch(e.key, false);
+        handleInputMatch(e.key);
       }
     };
 
@@ -804,26 +800,6 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [scene, enemies, overlappingEnemies, isGameOver, isGameClear, spawnedCount, phasesTriggered, selectedStage]);
-
-  // --- マウスクリックハンドラ ---
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (scene !== 'game' || isGameOver || isGameClear) return;
-    
-    // 規定のアクション
-    let inputVal = '';
-    if (e.button === 0) {
-      inputVal = '左';
-    } else if (e.button === 2) {
-      inputVal = '右';
-    } else if (e.button === 1) {
-      inputVal = 'ホ';
-    }
-
-    if (inputVal) {
-      e.preventDefault();
-      handleInputMatch(inputVal, true);
-    }
-  };
 
   // --- ステージクリア / 失敗の処理 ---
   const handleStageCleared = () => {
@@ -878,7 +854,7 @@ export default function App() {
               タイピングショット
             </h1>
             <p className="text-slate-400 max-w-md mx-auto text-sm leading-relaxed">
-              マウスで狙いを定め、赤い的（ターゲット）に表示されたキーを入力、または指定されたクリックで撃破するエイム＆タイピングゲーム。
+              マウスで狙いを定め、赤い的（ターゲット）に表示されたキーをキーボードで入力して撃破するエイム＆タイピングゲーム。
             </p>
           </div>
 
@@ -892,10 +868,6 @@ export default function App() {
               <li className="flex items-start gap-2.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
                 <span>**キーボード入力**: アルファベット、数字、記号が表示されている場合は、該当するキーを押す。</span>
-              </li>
-              <li className="flex items-start gap-2.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
-                <span>**マウス入力**: 「左」（左クリック）、「右」（右クリック）、「ホ」（ホイールクリック）を的の上で行う。</span>
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
@@ -1044,7 +1016,7 @@ export default function App() {
             id="game-stage-canvas"
             ref={gameAreaRef}
             onMouseMove={handleMouseMove}
-            onMouseDown={handleMouseDown}
+            onMouseDown={(e) => e.preventDefault()}
             onMouseEnter={() => setIsMouseInStage(true)}
             onMouseLeave={() => setIsMouseInStage(false)}
             onContextMenu={(e) => e.preventDefault()}
@@ -1054,9 +1026,6 @@ export default function App() {
             {/* 的 (エネミー) */}
             {enemies.map((enemy) => {
               const isTargetActive = overlappingEnemies.some(oe => oe.id === enemy.id);
-              
-              // マウスクリック系指示のバッジ色
-              const isMouseClick = MOUSE_INPUTS.includes(enemy.indicator);
 
               return (
                 <div
@@ -1081,12 +1050,10 @@ export default function App() {
                   <span
                     className={`font-mono font-black tracking-tighter ${
                       isTargetActive ? 'text-yellow-200' : 'text-white'
-                    } ${
-                      isMouseClick ? 'text-sm bg-black/40 px-2 py-0.5 rounded-full border border-white/20' : 'text-2xl'
-                    }`}
+                    } text-2xl`}
                     style={{
                       // エネミーの円サイズに合わせたテキストサイズ調整
-                      fontSize: isMouseClick ? undefined : `${Math.max(16, enemy.size * 0.28)}px`,
+                      fontSize: `${Math.max(16, enemy.size * 0.28)}px`,
                     }}
                   >
                     {enemy.indicator}
